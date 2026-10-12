@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  lint-test-build:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: paygate
+          POSTGRES_PASSWORD: paygate
+          POSTGRES_DB: paygate_test
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U paygate -d paygate_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Train fraud model
+        run: python scripts/train_fraud.py
+
+      - name: Ruff
+        run: |
+          ruff check app tests scripts
+          ruff format --check app tests scripts
+
+      - name: Pytest with coverage
+        env:
+          ENVIRONMENT: test
+          SECRET_KEY: ci-secret-key-at-least-32-bytes-long
+          DATABASE_URL: postgresql+asyncpg://paygate:paygate@localhost:5433/paygate_test
+          REDIS_URL: redis://localhost:6379/15
+          CELERY_BROKER_URL: redis://localhost:6379/14
+          CELERY_RESULT_BACKEND: redis://localhost:6379/13
+          RATE_LIMIT_REQUESTS: "1000"
+          WEBHOOK_MAX_ATTEMPTS: "3"
+          WEBHOOK_BASE_DELAY_SECONDS: "0.01"
+          FRAUD_THRESHOLD: "0.5"
+          FRAUD_MODEL_PATH: artifacts/fraud_model.joblib
+        run: pytest --cov=app --cov-report=term-missing --cov-report=xml --cov-fail-under=85 -q
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v4
+        with:
+          files: coverage.xml
+          fail_ci_if_error: false
+
+      - name: Build Docker image
+        run: docker build -t paygate:ci .

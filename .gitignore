@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+.env
+.venv/
+venv/
+dist/
+*.egg-info/
+paygate.egg-info/
+.mypy_cache/
+artifacts/*.joblib
+!artifacts/.gitkeep
